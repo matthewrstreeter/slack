@@ -7,6 +7,8 @@
 # 2. An OAuth token for the Slack App.
 # 3. The channel ID or channel name where the message will be posted.
 
+# See my guide for more information about this topic: https://www.matthewrstreeter.com/2026/04/15/send-message-in-slack-using-powershell/
+
 # Function to send a message to Slack
 function Send-SlackMessage {
     param (
