@@ -16,13 +16,13 @@ This script extracts two Slack export ZIP files, merges `users.json`, `channels.
 ```bash
 git clone <repo>
 cd /path/to/Slack
-python merge_slack_exports.py export1.zip export2.zip merged.zip
+python Slack-MergeExports.py export1.zip export2.zip merged.zip
 ```
 
 ### Example
 
 ```bash
-python merge_slack_exports.py slack-export-1.zip slack-export-2.zip slack-merged.zip
+python Slack-MergeExports.py slack-export-1.zip slack-export-2.zip slack-merged.zip
 ```
 
 ## How it works
