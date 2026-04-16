@@ -10,6 +10,7 @@ import zipfile
 import shutil
 import argparse
 import sys
+import tempfile
 from collections import defaultdict
 
 
@@ -60,7 +61,7 @@ def merge_message_files(base_file, new_file):
     save_json(base_file, base_msgs)
 
 
-def merge_exports(zip1, zip2, out_zip, temp_dir="merged_tmp"):
+def merge_exports(zip1, zip2, out_zip):
     # Validate input files exist
     if not os.path.exists(zip1):
         raise FileNotFoundError(f"Input file not found: {zip1}")
@@ -69,78 +70,74 @@ def merge_exports(zip1, zip2, out_zip, temp_dir="merged_tmp"):
     
     print(f"Merging {os.path.basename(zip1)} and {os.path.basename(zip2)}...")
     
-    # Extract both zips
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
+    # Use a temporary directory that's automatically cleaned up
+    with tempfile.TemporaryDirectory(prefix="slack_merge_") as temp_dir:
+        # Extract both zips
+        extract1 = os.path.join(temp_dir, "export1")
+        extract2 = os.path.join(temp_dir, "export2")
+        out_dir = os.path.join(temp_dir, "out")
+        os.makedirs(out_dir, exist_ok=True)
 
-    extract1 = os.path.join(temp_dir, "export1")
-    extract2 = os.path.join(temp_dir, "export2")
-    out_dir = os.path.join(temp_dir, "out")
-    os.makedirs(out_dir, exist_ok=True)
+        print("Extracting first export...")
+        with zipfile.ZipFile(zip1, "r") as z:
+            z.extractall(extract1)
+        print("Extracting second export...")
+        with zipfile.ZipFile(zip2, "r") as z:
+            z.extractall(extract2)
 
-    print("Extracting first export...")
-    with zipfile.ZipFile(zip1, "r") as z:
-        z.extractall(extract1)
-    print("Extracting second export...")
-    with zipfile.ZipFile(zip2, "r") as z:
-        z.extractall(extract2)
+        # Assume root folder name inside export
+        def find_root(path):
+            entries = list(os.scandir(path))
+            # Case 1: Slack export with files at the top level
+            if any(e.name == "users.json" for e in entries):
+                return path
+            # Case 2: Slack export nested inside a single folder
+            subdirs = [e for e in entries if e.is_dir()]
+            if len(subdirs) == 1:
+                return subdirs[0].path
+            raise RuntimeError(f"Could not determine export root in {path}")
+        root1 = find_root(extract1)
+        root2 = find_root(extract2)
 
-    # Assume root folder name inside export
-    def find_root(path):
-        entries = list(os.scandir(path))
-        # Case 1: Slack export with files at the top level
-        if any(e.name == "users.json" for e in entries):
-            return path
-        # Case 2: Slack export nested inside a single folder
-        subdirs = [e for e in entries if e.is_dir()]
-        if len(subdirs) == 1:
-            return subdirs[0].path
-        raise RuntimeError(f"Could not determine export root in {path}")
-    root1 = find_root(extract1)
-    root2 = find_root(extract2)
+        # Merge users.json
+        users1 = load_json(os.path.join(root1, "users.json"))
+        users2 = load_json(os.path.join(root2, "users.json"))
+        merged_users = merge_users(users1, users2)
+        save_json(os.path.join(out_dir, "users.json"), merged_users)
 
-    # Merge users.json
-    users1 = load_json(os.path.join(root1, "users.json"))
-    users2 = load_json(os.path.join(root2, "users.json"))
-    merged_users = merge_users(users1, users2)
-    save_json(os.path.join(out_dir, "users.json"), merged_users)
+        # Merge channels.json
+        channels1 = load_json(os.path.join(root1, "channels.json"))
+        channels2 = load_json(os.path.join(root2, "channels.json"))
+        merged_channels = merge_channels(channels1, channels2)
+        save_json(os.path.join(out_dir, "channels.json"), merged_channels)
 
-    # Merge channels.json
-    channels1 = load_json(os.path.join(root1, "channels.json"))
-    channels2 = load_json(os.path.join(root2, "channels.json"))
-    merged_channels = merge_channels(channels1, channels2)
-    save_json(os.path.join(out_dir, "channels.json"), merged_channels)
+        # Merge channel message folders
+        for root in [root1, root2]:
+            for entry in os.scandir(root):
+                # skip top-level JSON files (users.json, channels.json, canvases.json, etc.)
+                if entry.is_file():
+                    continue
 
-    # Merge channel message folders
-    for root in [root1, root2]:
-        for entry in os.scandir(root):
-            # skip top-level JSON files (users.json, channels.json, canvases.json, etc.)
-            if entry.is_file():
-                continue
+                # handle only channel folders
+                if entry.is_dir():
+                    out_chan_dir = os.path.join(out_dir, os.path.basename(entry.path))
+                    os.makedirs(out_chan_dir, exist_ok=True)
 
-            # handle only channel folders
-            if entry.is_dir():
-                out_chan_dir = os.path.join(out_dir, os.path.basename(entry.path))
-                os.makedirs(out_chan_dir, exist_ok=True)
+                    for file in os.scandir(entry.path):
+                        if not file.name.endswith(".json"):
+                            continue
+                        out_file = os.path.join(out_chan_dir, file.name)
+                        merge_message_files(out_file, file.path)
 
-                for file in os.scandir(entry.path):
-                    if not file.name.endswith(".json"):
-                        continue
-                    out_file = os.path.join(out_chan_dir, file.name)
-                    merge_message_files(out_file, file.path)
+        # Zip it up
+        print("Creating merged export...")
+        with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
+            for root, _, files in os.walk(out_dir):
+                for f in files:
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, out_dir)
+                    z.write(full, rel)
 
-    # Zip it up
-    print("Creating merged export...")
-    with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, _, files in os.walk(out_dir):
-            for f in files:
-                full = os.path.join(root, f)
-                rel = os.path.relpath(full, out_dir)
-                z.write(full, rel)
-
-    # Cleanup
-    shutil.rmtree(temp_dir)
     print(f"✓ Merged export written to {out_zip}")
 
 
