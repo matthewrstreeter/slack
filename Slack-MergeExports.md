@@ -1,4 +1,4 @@
-# merge_slack_exports.py
+# Slack-MergeExports.py
 
 A small utility to merge two Slack export ZIP files into a single combined export.
 
