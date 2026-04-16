@@ -4,6 +4,8 @@
 # Note: This script assumes both exports are from the same workspace and have compatible formats.
 # V1.0 - 15-Apr-2026 - Initial version
 
+# See my guide for more information about this topic: https://www.matthewrstreeter.com/2026/04/15/merge-slack-exports/
+
 import json
 import os
 import zipfile
